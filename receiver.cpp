@@ -2,21 +2,35 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <netdb.h>
 
-#include <iostream>
 #include <string>
-#include <cstring>
+#include <vector>
+#include <iostream>
+
+#define BUFSIZE 1024
+#define QUEUESIZE 65535
+#define WINSIZE 32
 
 using namespace std;
 
-void error(char *msg)
+
+int GetAckNum(string &buf)
 {
-    perror(msg);
-    exit(1);
+  char str[33];
+  size_t len = buf.copy(str, 32, 32);
+  str[len] = '\0';
+  return atoi(str);
+}
+
+int GetSeqNum(string &buf)
+{
+  return buf[0];
 }
 
 int main(int argc, char* argv[])
@@ -25,8 +39,6 @@ int main(int argc, char* argv[])
   int portno;
   struct sockaddr_in serv_addr;
   struct hostent *server; //contains tons of information, including the server's IP address
-
-  char buf[BUFSIZE];
 
   if (argc < 4) {
     fprintf(stderr,"usage %s hostname port filename\n", argv[0]);
@@ -38,7 +50,7 @@ int main(int argc, char* argv[])
 
   sockfd = socket(AF_INET, SOCK_DGRAM, 0);
   if (sockfd < 0)
-    error("ERROR opening socket");
+    printf("ERROR opening socket");
 
   server = gethostbyname(argv[1]);
   if (server == NULL) {
@@ -52,12 +64,38 @@ int main(int argc, char* argv[])
   serv_addr.sin_port = htons(portno);
 
   string msg;
-  msg.append("retrive ");
+  msg.append("retrieve: ");
   msg += filename;
-
-  if (sendto(sockfd, msg.c_str(), msg.length() + 1, 0, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
-    error("Send msg to sender failed\n");
+  if (sendto(sockfd, msg.c_str(), strlen(msg.c_str()), 0, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+    printf("Send msg to sender failed\n");
     return 0;
   }
+
+  vector<int> ack(QUEUESIZE,0);
+  vector<string> recvQueue(QUEUESIZE);
+  int winSize = WINSIZE;
+  int recBase = 0;
+
+  struct sockaddr_in rec_addr; // receiver address
+  socklen_t addrlen = sizeof(rec_addr);
+  int recvlen; // # bytes received
+  char buf[BUFSIZE]; 
+
+  int ackNum;
+  int seqNum;
+  // Receive File
+  while (1) {
+    recvlen = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&rec_addr, &addrlen);  
+    
+    string buffer(buf, recvlen);
+    cout << "receive msg = " << buffer << endl;
+//    ackNum = GetAckNum(buffer);
+    seqNum = GetSeqNum(buffer);
+    cout << "Seq: " << seqNum << endl;
+    string payload = buffer.substr(1);
+    cout << "Payload: " << payload << endl;
+//    cout << "Ack: " << ackNum << "  Seq: " << seqNum << endl;
+  }
   
+  return 0;
 }
