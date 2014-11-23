@@ -1,11 +1,15 @@
-#include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <iostream>
+#include <cstring>
+#include <netdb.h>
+
+
+#define BUFSIZE 1024
 
 void error(char *msg)
 {
@@ -15,9 +19,18 @@ void error(char *msg)
 
 int main (int argc, char* argv[])
 {
+  struct sockaddr_in sender_addr; // sender address
+  struct sockaddr_in rec_addr; // receiver address
+  socklen_t addrlen = sizeof(rec_addr);
+
+  int sockfd; // server socket
+
+  unsigned char buf[BUFSIZE]; // receive buffer
+  int recvlen; // # bytes received
+
   // Make sure the port number is provided.   
   if (argc < 2) {
-    fprintf(stderr,"USAGE: %s PORT\n", argv[0]);
+    cout << "USAGE: " << argv[0] << " PORT" << endl;
     exit(1);
   }
 
@@ -26,11 +39,10 @@ int main (int argc, char* argv[])
   if (sockfd < 0) {
     error("ERROR: sender open socket failure\n");
   }
-  printf("Sender socket created\n");
+  cout << "Sender socket created" << endl;
 
 
   int port = atoi(argv[1]);
-  struct sockaddr_in sender_addr;
   
   memset((char*) &sender_addr, 0, sizeof(sender_addr)) ;
   sender_addr.sin_family = AF_INET;
@@ -41,13 +53,12 @@ int main (int argc, char* argv[])
     close(sockfd);
     error("ERROR: sender bind socket failure\n");
   }
-  printf("server bind to port %d, done\n", sockfd);
+  cout << "server bind to port " << sockfd << ", done" << endl;
 
-  // Listen to receiver
   while (1) {
-    
+    recvlen = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&rec_addr, &addrlen);
+    cout << "receive msg: " << buf << endl;
   }
   
-
   return 0;
 }
