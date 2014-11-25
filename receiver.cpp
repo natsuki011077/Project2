@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <fstream>
 
 #define BUFSIZE 1024
 #define QUEUESIZE 65535
@@ -19,18 +20,27 @@
 
 using namespace std;
 
-
-int GetAckNum(string &buf)
-{
-  char str[33];
-  size_t len = buf.copy(str, 32, 32);
-  str[len] = '\0';
-  return atoi(str);
-}
-
 int GetSeqNum(string &buf)
 {
   return buf[0];
+}
+
+int GetEOFFlag(string &buf)
+{
+  return buf[1];
+}
+
+void SendACK(int sockfd, struct sockaddr_in& serv_addr, int seq)
+{
+  // Write ACK number.
+  char msg[4];
+  strcpy(msg,"");
+  msg[0] = (seq) & 0xFF;
+  msg[1] = (seq >> 8) & 0xFF;
+  msg[2] = (seq >> 16) & 0xFF;
+  msg[3] = (seq >> 24) & 0xFF;
+
+  sendto(sockfd, msg, strlen(msg), 0, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
 }
 
 int main(int argc, char* argv[])
@@ -71,7 +81,7 @@ int main(int argc, char* argv[])
     return 0;
   }
 
-  vector<int> ack(QUEUESIZE,0);
+  vector<int> received(QUEUESIZE,0);
   vector<string> recvQueue(QUEUESIZE);
   int winSize = WINSIZE;
   int recBase = 0;
@@ -81,20 +91,63 @@ int main(int argc, char* argv[])
   int recvlen; // # bytes received
   char buf[BUFSIZE]; 
 
-  int ackNum;
   int seqNum;
+  int EOFFlag;
+  unsigned int recvWin = WINSIZE;
+  int recvBase = 0;
+  int recvEnd = recvBase + recvWin - 1;
+  int recvFront = -recvWin;
+  // Outputfile
+  ofstream outfile;
+  string outFilename("rec_");
+  outFilename += filename;
+  outfile.open(outFilename.c_str());
+
   // Receive File
   while (1) {
     recvlen = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&rec_addr, &addrlen);  
     
     string buffer(buf, recvlen);
-    cout << "receive msg = " << buffer << endl;
-//    ackNum = GetAckNum(buffer);
+//    cout << "receive msg = " << buffer << endl;
     seqNum = GetSeqNum(buffer);
-    cout << "Seq: " << seqNum << endl;
-    string payload = buffer.substr(1);
+    EOFFlag = GetEOFFlag(buffer);
+    cout << "Seq: " << seqNum << "  EOFFlag: " << EOFFlag << endl;
+    string payload = buffer.substr(2);
     cout << "Payload: " << payload << endl;
-//    cout << "Ack: " << ackNum << "  Seq: " << seqNum << endl;
+   
+    int c;
+    scanf("%d", &c);   
+    // Seq is in [rcv_base, rcv_base+N-1]
+    if ((seqNum >= recvBase) && (seqNum <= recvEnd)) {
+      // Write queue buffer
+      received[seqNum] = (EOFFlag? 2: 1);
+      recvQueue[seqNum].assign(payload);
+      // Send ACK.
+      SendACK(sockfd, serv_addr, seqNum);
+      // Write payload to file if recvBase is received.
+      if (seqNum == recvBase) {
+        while (received[recvBase]) {
+          // Write data to file.
+          outfile << recvQueue[recvBase];
+          if (received[recvBase] == 2) {
+            // Received all data.
+            outfile.close();
+            cout << "File transfer complete." << endl;
+            return 0;
+          }
+          received[seqNum] = 0;
+          // Update base.
+          recvBase = recvBase + 1;
+          recvEnd = recvEnd + 1;
+          recvFront = recvFront + 1;
+        }
+      }
+    } else if ((seqNum < recvBase) && (seqNum >= recvFront)) { // Seq is in [rcv_base-N, rcv_base-1]
+      // Send ACK.
+      SendACK(sockfd, serv_addr, seqNum);
+    } else {
+      // Ignore.
+    }
   }
   
   return 0;
