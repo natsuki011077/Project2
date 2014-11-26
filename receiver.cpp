@@ -12,35 +12,18 @@
 #include <string>
 #include <vector>
 #include <iostream>
-#include <fstream>
 
-#define BUFSIZE 1024
-#define QUEUESIZE 65535
-#define WINSIZE 32
+#include "header.h"
 
 using namespace std;
 
-int GetSeqNum(string &buf)
-{
-  return buf[0];
-}
-
-int GetEOFFlag(string &buf)
-{
-  return buf[1];
-}
-
 void SendACK(int sockfd, struct sockaddr_in& serv_addr, int seq)
 {
-  // Write ACK number.
   char msg[4];
-  strcpy(msg,"");
-  msg[0] = (seq) & 0xFF;
-  msg[1] = (seq >> 8) & 0xFF;
-  msg[2] = (seq >> 16) & 0xFF;
-  msg[3] = (seq >> 24) & 0xFF;
-
-  sendto(sockfd, msg, strlen(msg), 0, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+  struct ACKHeader *ack = (struct ACKHeader *) msg;
+  ack->ackNum = seq;
+  sendto(sockfd, msg, sizeof(msg), 0, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+  cout << "SEND: ACK " << seq << endl;
 }
 
 int main(int argc, char* argv[])
@@ -49,14 +32,15 @@ int main(int argc, char* argv[])
   int portno;
   struct sockaddr_in serv_addr;
   struct hostent *server; //contains tons of information, including the server's IP address
-
+  char filename[200];
+ 
   if (argc < 4) {
     fprintf(stderr,"usage %s hostname port filename\n", argv[0]);
     exit(0);
   }
 
   portno = atoi(argv[2]);
-  string filename(argv[3]);
+  strcpy(filename, argv[3]);
 
   sockfd = socket(AF_INET, SOCK_DGRAM, 0);
   if (sockfd < 0)
@@ -73,16 +57,18 @@ int main(int argc, char* argv[])
   bcopy((char *)server->h_addr, (char *)&serv_addr.sin_addr.s_addr, server->h_length);
   serv_addr.sin_port = htons(portno);
 
-  string msg;
-  msg.append("retrieve: ");
-  msg += filename;
-  if (sendto(sockfd, msg.c_str(), strlen(msg.c_str()), 0, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+  // Send retrieve message.
+  char msg[256];
+  strcpy(msg, "retrieve: ");
+  strcat(msg, filename); 
+  if (sendto(sockfd, msg, strlen(msg), 0, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
     printf("Send msg to sender failed\n");
     return 0;
   }
+  cout << "SEND: " << msg << endl;
 
-  vector<int> received(QUEUESIZE,0);
-  vector<string> recvQueue(QUEUESIZE);
+  int received[QUEUESIZE];
+  char recvQueue[QUEUESIZE][BUFSIZE];
   int winSize = WINSIZE;
   int recBase = 0;
 
@@ -91,51 +77,64 @@ int main(int argc, char* argv[])
   int recvlen; // # bytes received
   char buf[BUFSIZE]; 
 
-  int seqNum;
-  int EOFFlag;
+  uint32_t seqNum;
   unsigned int recvWin = WINSIZE;
   int recvBase = 0;
   int recvEnd = recvBase + recvWin - 1;
   int recvFront = -recvWin;
-  // Outputfile
-  ofstream outfile;
-  string outFilename("rec_");
-  outFilename += filename;
-  outfile.open(outFilename.c_str());
 
+  // Outputfile
+  FILE *fd;
+  char outFilename[256];
+  strcpy(outFilename, "rec_");
+  strcat(outFilename, filename);
+  fd = fopen(outFilename, "wb");
+  
+//  int discard = 0;
   // Receive File
   while (1) {
-    recvlen = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&rec_addr, &addrlen);  
-    
-    string buffer(buf, recvlen);
-//    cout << "receive msg = " << buffer << endl;
-    seqNum = GetSeqNum(buffer);
-    EOFFlag = GetEOFFlag(buffer);
-    cout << "Seq: " << seqNum << "  EOFFlag: " << EOFFlag << endl;
-    string payload = buffer.substr(2);
-    cout << "Payload: " << payload << endl;
-   
-    int c;
-    scanf("%d", &c);   
+
+    memset(buf, 0, BUFSIZE);
+    recvlen = recvfrom(sockfd, buf, sizeof(SendHeader), 0, (struct sockaddr *)&rec_addr, &addrlen);  
+
+    // Parse header.
+    struct SendHeader *header = (struct SendHeader *) buf;
+    seqNum = header->seqNum;
+    cout << "RECEIVE: PKT: " << seqNum << endl;
+/*
+    if (!discard && seqNum == 8) {
+      cout << "discard pkt 8" << endl;
+      discard = 1;
+      continue;
+    }
+*/
     // Seq is in [rcv_base, rcv_base+N-1]
     if ((seqNum >= recvBase) && (seqNum <= recvEnd)) {
       // Write queue buffer
-      received[seqNum] = (EOFFlag? 2: 1);
-      recvQueue[seqNum].assign(payload);
+      received[seqNum] = 1;
+      memcpy(recvQueue[seqNum], buf, BUFSIZE);
       // Send ACK.
       SendACK(sockfd, serv_addr, seqNum);
       // Write payload to file if recvBase is received.
       if (seqNum == recvBase) {
         while (received[recvBase]) {
+
+          header = (struct SendHeader *) recvQueue[recvBase];
+          uint16_t EOFFlag = header->EOFFlag;
+          uint16_t length = header->length;
+
           // Write data to file.
-          outfile << recvQueue[recvBase];
-          if (received[recvBase] == 2) {
-            // Received all data.
-            outfile.close();
+          fwrite(header->payload, 1, length, fd);
+          cout << "WRITE: PKT " << recvBase << " to file." << endl;
+          
+          // Received all data, exit. 
+          if (EOFFlag) {
+            fclose(fd);
             cout << "File transfer complete." << endl;
             return 0;
           }
-          received[seqNum] = 0;
+
+          received[recvBase] = 0;
           // Update base.
           recvBase = recvBase + 1;
           recvEnd = recvEnd + 1;
