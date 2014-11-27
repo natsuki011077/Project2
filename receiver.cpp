@@ -89,8 +89,8 @@ int main(int argc, char* argv[])
   strcpy(outFilename, "rec_");
   strcat(outFilename, filename);
   fd = fopen(outFilename, "wb");
-  
-//  int discard = 0;
+
+  srand(time(NULL));  
   // Receive File
   while (1) {
 
@@ -100,14 +100,17 @@ int main(int argc, char* argv[])
     // Parse header.
     struct SendHeader *header = (struct SendHeader *) buf;
     seqNum = header->seqNum;
-    cout << "RECEIVE: PKT: " << seqNum << endl;
-/*
-    if (!discard && seqNum == 8) {
-      cout << "discard pkt 8" << endl;
-      discard = 1;
+
+    if (isCorrupt()) {
+      cout << "CORRUPT: PKT" << seqNum << endl;
+      continue;  
+    } else if (isLoss()) {
+      cout << "LOSS: PKT" << seqNum << endl;
       continue;
+    } else {
+      cout << "RECEIVE: PKT: " << seqNum << endl;
     }
-*/
+    
     // Seq is in [rcv_base, rcv_base+N-1]
     if ((seqNum >= recvBase) && (seqNum <= recvEnd)) {
       // Write queue buffer

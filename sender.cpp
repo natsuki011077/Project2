@@ -8,8 +8,6 @@
 #include <cstring>
 #include <iostream>
 #include <stdio.h>
-#include <vector>
-
 #include <sys/time.h>
 
 #include "header.h"
@@ -76,14 +74,17 @@ int main (int argc, char* argv[])
   int ack[QUEUESIZE];
   char sendQueue[QUEUESIZE][BUFSIZE];
   memset(sendQueue, 0, QUEUESIZE*BUFSIZE);
+  memset(ack, 0, QUEUESIZE);
+  // sendwindow
   int winSize = WINSIZE;
   int sendBase = 0;
   int nextSeq = 0;
   int lastSeq = -1; // EOF seq num.
-
   // select
   struct timeval tv;
   fd_set sockfds;
+  // random for packet corrupt/loss.
+  srand(time(NULL));
 
   // Send file.
   while (1) {
@@ -133,6 +134,7 @@ int main (int argc, char* argv[])
       // Set timeout 2.5s
       tv.tv_sec = 2;
       tv.tv_usec = 500000;
+
       FD_ZERO(&sockfds);
       FD_SET(sockfd, &sockfds);
 
@@ -145,9 +147,17 @@ int main (int argc, char* argv[])
 
         struct ACKHeader *ackHeader = (struct ACKHeader *) buf;
         int ackNum = ackHeader->ackNum;
-        // Set ACK.
-        ack[ackNum] = 1;
-        cout << "RECEIVE: ACK " << ackNum << endl;
+        
+        if (isCorrupt()) {
+          cout << "CORRUPT: ACK" << ackNum << endl;
+          continue;
+        } else if (isLoss()) {
+          cout << "LOSS: PKT" << ackNum << endl;
+          continue;
+        } else {
+          ack[ackNum] = 1; // Set ACK.
+          cout << "RECEIVE: ACK " << ackNum << endl;
+        }
 
 #ifdef DEBUG
         cout << "SendBase = " << sendBase << endl;
