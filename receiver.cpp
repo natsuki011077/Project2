@@ -105,7 +105,7 @@ int main(int argc, char* argv[])
       cout << "CORRUPT: DATA " << seqNum << endl;
       continue;  
     } else if (isLoss()) {
-      cout << "LOSS:    DATA " << seqNum << endl;
+      cout << "LOSS: DATA " << seqNum << endl;
       continue;
     } else {
       cout << "RECEIVE: DATA " << seqNum << endl;
