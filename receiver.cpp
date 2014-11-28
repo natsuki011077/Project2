@@ -9,8 +9,6 @@
 #include <signal.h>
 #include <netdb.h>
 
-#include <string>
-#include <vector>
 #include <iostream>
 
 #include "header.h"
@@ -22,7 +20,7 @@ void SendACK(int sockfd, struct sockaddr_in& serv_addr, int seq)
   struct ACKHeader *ack = (struct ACKHeader *) msg;
   ack->ackNum = seq;
   sendto(sockfd, msg, sizeof(msg), 0, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
-  cout << "SEND: ACK " << seq << endl;
+  cout << "  SEND: ACK " << seq << endl;
 }
 
 int main(int argc, char* argv[])
@@ -79,8 +77,7 @@ int main(int argc, char* argv[])
   uint32_t seqNum;
   unsigned int recvWin = WINSIZE;
   int recvBase = 0;
-  int recvEnd = recvBase + recvWin - 1;
-  int recvFront = -recvWin;
+  int recvFront = QSIZE - recvWin;
 
   // Outputfile
   FILE *fd;
@@ -151,7 +148,7 @@ int main(int argc, char* argv[])
                 cout << "CORRUPT: DATA " << header->seqNum << endl;
                 continue;
               } else if (isLoss()) {
-                cout << "LOSS:    DATA " << header->seqNum << endl;
+                cout << "LOSS: DATA " << header->seqNum << endl;
                 continue;
               } else {
                 cout << "RECEIVE: DATA " << header->seqNum << endl;
@@ -163,17 +160,17 @@ int main(int argc, char* argv[])
           received[recvBase] = 0;
           // Update base.
           recvBase = (recvBase == QSIZE - 1)? 0: recvBase + 1;
-          recvEnd = (recvEnd == QSIZE - 1)? 0: recvEnd + 1;
           recvFront = (recvFront == QSIZE)? 0: recvFront + 1;          
         }
       }
-    } else if (1) { // Seq is in [rcv_base-N, rcv_base-1]
-      // Send ACK.   
+    } else if (((seqNum >= recvFront) && (seqNum - recvFront < recvWin)) ||
+               ((seqNum < recvFront) && 
+                (seqNum < (recvWin - (QSIZE - recvFront))))) {
+      // Seq is in [rcv_base-N, rcv_base-1]. Send ACK.   
       SendACK(sockfd, serv_addr, seqNum);
     } else {
       // Ignore.
     }
   }
- 
   return 0;
 }

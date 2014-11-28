@@ -33,9 +33,6 @@ int main (int argc, char* argv[])
     exit(1);
   }
 
-  // Congestion control flag.
-  bool enableCC = (argc == 3 && atoi(argv[2]) == 1) ? true: false;
-
   // Obtain the fd for UDP listening socket.
   sockfd = socket(AF_INET, SOCK_DGRAM, 0);
   if (sockfd < 0) {
@@ -74,9 +71,7 @@ int main (int argc, char* argv[])
   }
 
   // sendwindow
-  int cwnd = (enableCC) ? 1: WINSIZE;
-  int ssthresh = SSTHRESH;
-  CongControl state = SLOWSTART;
+  int cwnd = WINSIZE;
   int sendBase = 0;
   int nextSeq = 0;
   int lastSeq = -1; // EOF seq num.
@@ -137,18 +132,15 @@ int main (int argc, char* argv[])
       nextSeq = (nextSeq == QSIZE-1) ? 0: nextSeq + 1; 
     }
 
-    // Set timeout 2.5s
-    tv.tv_sec = 2;
-    tv.tv_usec = 500000;
-    struct timeval tvDiff, tvEnd, tvBegin;
     // Wait for ACK.
     while (1) {
+      // Set timeout 2.5s
+      tv.tv_sec = 2;
+      tv.tv_usec = 500000;
       // Set select fds.
       FD_ZERO(&sockfds);
       FD_SET(sockfd, &sockfds);
 
-      // Get time.
-      gettimeofday(&tvBegin, NULL);
       // Use select to receive ack and deal with timeout.
       select(sockfd+1, &sockfds, NULL, NULL, &tv);
 
@@ -164,22 +156,10 @@ int main (int argc, char* argv[])
         // Deal with Loss and corrupt.
         if (isCorrupt()) {
           printf("%sCORRUPT: ACK %d\n%s", KRED, ackNum, KEND);
-          gettimeofday(&tvEnd, NULL);
-          if (timeval_subtract(&tv, &tvDiff, &tvEnd, &tvBegin)) {
-            tv.tv_sec -= tvDiff.tv_sec;
-            tv.tv_usec -= tvDiff.tv_usec;
-            gettimeofday(&tvBegin, NULL);
-            continue;
-          }
+          continue;
         } else if (isLoss()) {
           printf("%sLOSS: ACK %d\n%s", KRED, ackNum, KEND); 
-          gettimeofday(&tvEnd, NULL);
-          if (timeval_subtract(&tv, &tvDiff, &tvEnd, &tvBegin)) {
-            tv.tv_sec -= tvDiff.tv_sec;
-            tv.tv_usec -= tvDiff.tv_usec;
-            gettimeofday(&tvBegin, NULL);
-            continue;
-          }
+          continue;
         } else {
           ack[ackNum] = 1; // Set ACK.
           cout << "RECEIVE: ACK " << ackNum << endl;
@@ -219,10 +199,6 @@ int main (int argc, char* argv[])
             printf("Send msg to sender failed\n");
         } else {
           cout << "RESEND: DATA " << sendBase << endl;
-          // Set timeout 2.5s
-          tv.tv_sec = 2;
-          tv.tv_usec = 500000;
-          gettimeofday(&tvBegin, NULL);
         }
       }    
     }
