@@ -24,7 +24,6 @@ int main (int argc, char* argv[])
 
   char buf[BUFSIZE]; // receive buffer
   int recvlen; // # bytes received
-
   FILE *fd;
   char filename[256];
 
@@ -46,7 +45,7 @@ int main (int argc, char* argv[])
   sender_addr.sin_family = AF_INET;
   sender_addr.sin_addr.s_addr = INADDR_ANY;
   sender_addr.sin_port = htons(port);
-
+  // Bind socket.
   if (bind(sockfd, (struct sockaddr *) &sender_addr, sizeof(sender_addr)) < 0) {
     printf("ERROR: sender bind socket failure\n");
   }
@@ -55,10 +54,11 @@ int main (int argc, char* argv[])
   // Wait for retrieve message. 
   while (1) {
     memset(buf, 0, BUFSIZE);
-    recvlen = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&rec_addr, &addrlen);
+    recvlen = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&rec_addr,
+                       &addrlen);
     cout << "RECEIVE MSG: " << buf << endl;
  
-    if (strncmp(buf, "retrieve: ",10) == 0) {
+    if (strncmp(buf, "RETRIEVE: ",10) == 0) {
       // Check if file exists.
       strcpy(filename, buf+10);
       if ((fd = fopen(filename, "rb")) == NULL) {
@@ -70,16 +70,16 @@ int main (int argc, char* argv[])
     }
   }
 
-  // sendqueue
-  int ack[QUEUESIZE];
-  char sendQueue[QUEUESIZE][BUFSIZE];
-  memset(sendQueue, 0, QUEUESIZE*BUFSIZE);
-  memset(ack, 0, QUEUESIZE);
   // sendwindow
   int winSize = WINSIZE;
   int sendBase = 0;
   int nextSeq = 0;
   int lastSeq = -1; // EOF seq num.
+  // sendqueue
+  int ack[QSIZE];
+  char sendQueue[QSIZE][BUFSIZE];
+  memset(sendQueue, 0, QSIZE*BUFSIZE);
+  memset(ack, 0, QSIZE);
   // select
   struct timeval tv;
   fd_set sockfds;
@@ -88,71 +88,77 @@ int main (int argc, char* argv[])
 
   // Send file.
   while (1) {
-    while ((nextSeq < sendBase + winSize) && lastSeq == -1) {
-      // More slots in window.
+    // Unused slots exist in window.
+    while ((((nextSeq >= sendBase) && (nextSeq - sendBase < winSize)) ||
+           ((nextSeq < sendBase) && nextSeq < (winSize - (QSIZE - sendBase))))
+           && lastSeq == -1 ) { 
+
       // Read file.
-      char payload[SIZE];
-      memset(payload, 0, SIZE);
-      int n = fread(payload, 1, SIZE, fd);
- 
+      memset(buf, 0, SIZE);
+      recvlen = fread(buf, 1, SIZE, fd);
+      // Construct data. 
       char datagram[BUFSIZE];
       memset(datagram, 0, BUFSIZE); 
       struct SendHeader *header = (struct SendHeader *) datagram;
       // Write header.
       header->seqNum = nextSeq;
       header->EOFFlag = (feof(fd)) ? 1: 0;
-      header->length = n;
+      header->length = recvlen;
         if (feof(fd)) {
         lastSeq = nextSeq;
         fclose(fd);
       }
       // Write payload.
-      memcpy(header->payload, payload, n);
+      memcpy(header->payload, buf, recvlen);
 
-      // Write queue. 
+      // Write data to queue.
       memcpy(sendQueue[nextSeq], datagram, BUFSIZE);
       ack[nextSeq] = 0;
 
 #ifdef DEBUG
-      cout << "Seq #:" << header->nextSeq << " EOF: " << header->EOFFlag << " length: " << header->length << endl;
+      cout << "Seq #:" << header->nextSeq << " EOF: " << header->EOFFlag <<
+              " length: " << header->length << endl;
 #endif
 
       // Send msg.
-      if (sendto(sockfd, sendQueue[nextSeq], sizeof(SendHeader), 0, (struct sockaddr *)&rec_addr, sizeof(rec_addr)) < 0) {
+      if (sendto(sockfd, sendQueue[nextSeq], sizeof(SendHeader), 0,
+          (struct sockaddr *)&rec_addr, sizeof(rec_addr)) < 0) {
         printf("Send msg to sender failed\n");
       } else {
-        cout << "SEND: PKT " << nextSeq << endl;
+        cout << "SEND: DATA " << nextSeq << endl;
       }
 
-     // Increment sequence number.
-      nextSeq = nextSeq + 1; 
+     // Increment sequence number. (circular)
+      nextSeq = (nextSeq == QSIZE-1) ? 0: nextSeq + 1; 
     }
 
     // Wait for ACK.
-    int update = 0;
-    while (!update) {
+    while (1) {
       // Set timeout 2.5s
       tv.tv_sec = 2;
       tv.tv_usec = 500000;
-
+      // Set select fds.
       FD_ZERO(&sockfds);
       FD_SET(sockfd, &sockfds);
 
-      // Use select for timeout.
+      // Use select to receive ack and deal with timeout.
       select(sockfd+1, &sockfds, NULL, NULL, &tv);
 
-      if (FD_ISSET(sockfd, &sockfds)) { // Receive ACK.
+      // ACK received.
+      if (FD_ISSET(sockfd, &sockfds)) {
         memset(buf, 0, BUFSIZE);
-        recvlen = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&rec_addr, &addrlen);
+        recvlen = recvfrom(sockfd, buf, BUFSIZE, 0,
+                           (struct sockaddr *)&rec_addr, &addrlen);
 
         struct ACKHeader *ackHeader = (struct ACKHeader *) buf;
         int ackNum = ackHeader->ackNum;
         
+        // Deal with Loss and corrupt.
         if (isCorrupt()) {
-          cout << "CORRUPT: ACK" << ackNum << endl;
+          printf("%sCORRUPT: ACK %d\n%s", KRED, ackNum, KEND);
           continue;
         } else if (isLoss()) {
-          cout << "LOSS: PKT" << ackNum << endl;
+          printf("%sLOSS: ACK %d\n%s", KRED, ackNum, KEND); 
           continue;
         } else {
           ack[ackNum] = 1; // Set ACK.
@@ -165,26 +171,32 @@ int main (int argc, char* argv[])
 #endif
         // If ackNum != sendBase, continue to listen for ACK.
  
-        // If ackNum == sendBase, update sendBase
+        // If ackNum == sendBase, update sendBase.
         if (ackNum == sendBase) {
           while (ack[sendBase]) {
             ack[sendBase] = 0; // clear ACK queue.
             // If ACK to the last seq, file has been reliably received.
             if (sendBase == lastSeq) {
               cout << "Reliable transfer done!" << endl;
+              char msg[20] = "TRANSFER DONE";
+              sendto(sockfd, msg, sizeof(msg), 0, (struct sockaddr *)&rec_addr,
+                     sizeof(rec_addr));
+              cout << "SEND: TRANSFER DONE (RECEIVE ALL ACK)" << endl;
+
               return 0;
             }
-            sendBase = sendBase + 1;
+            sendBase = (sendBase == QSIZE-1)? 0: sendBase + 1;
           }
-          // Set update to 1 to send more pkt.
-          update = 1;
+          // If sendBase is incremented, break while send more data.
+          break;
         }
       } else { // Timeout. Resend base.
         // Resend pkt from queue.
-        if (sendto(sockfd, sendQueue[sendBase], sizeof(SendHeader), 0, (struct sockaddr *)&rec_addr, sizeof(rec_addr)) < 0) {
+        if (sendto(sockfd, sendQueue[sendBase], sizeof(SendHeader), 0,
+                   (struct sockaddr *)&rec_addr, sizeof(rec_addr)) < 0) {
             printf("Send msg to sender failed\n");
         } else {
-          cout << "RESEND: PKT " << sendBase << endl;
+          cout << "RESEND: DATA " << sendBase << endl;
         }
       }    
     }

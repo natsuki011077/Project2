@@ -14,7 +14,6 @@
 #include <iostream>
 
 #include "header.h"
-
 using namespace std;
 
 void SendACK(int sockfd, struct sockaddr_in& serv_addr, int seq)
@@ -59,16 +58,16 @@ int main(int argc, char* argv[])
 
   // Send retrieve message.
   char msg[256];
-  strcpy(msg, "retrieve: ");
+  strcpy(msg, "RETRIEVE: ");
   strcat(msg, filename); 
   if (sendto(sockfd, msg, strlen(msg), 0, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
     printf("Send msg to sender failed\n");
     return 0;
   }
-  cout << "SEND: " << msg << endl;
+  cout << "SEND MSG: " << msg << endl;
 
-  int received[QUEUESIZE];
-  char recvQueue[QUEUESIZE][BUFSIZE];
+  int received[QSIZE];
+  char recvQueue[QSIZE][BUFSIZE];
   int winSize = WINSIZE;
   int recBase = 0;
 
@@ -93,29 +92,33 @@ int main(int argc, char* argv[])
   srand(time(NULL));  
   // Receive File
   while (1) {
-
     memset(buf, 0, BUFSIZE);
-    recvlen = recvfrom(sockfd, buf, sizeof(SendHeader), 0, (struct sockaddr *)&rec_addr, &addrlen);  
+    recvlen = recvfrom(sockfd, buf, sizeof(SendHeader), 0,
+                       (struct sockaddr *)&rec_addr, &addrlen);  
 
     // Parse header.
     struct SendHeader *header = (struct SendHeader *) buf;
     seqNum = header->seqNum;
 
+    // Check if data is corrupt or loss.
     if (isCorrupt()) {
-      cout << "CORRUPT: PKT" << seqNum << endl;
+      cout << "CORRUPT: DATA " << seqNum << endl;
       continue;  
     } else if (isLoss()) {
-      cout << "LOSS: PKT" << seqNum << endl;
+      cout << "LOSS:    DATA " << seqNum << endl;
       continue;
     } else {
-      cout << "RECEIVE: PKT: " << seqNum << endl;
+      cout << "RECEIVE: DATA " << seqNum << endl;
     }
     
     // Seq is in [rcv_base, rcv_base+N-1]
-    if ((seqNum >= recvBase) && (seqNum <= recvEnd)) {
-      // Write queue buffer
-      received[seqNum] = 1;
-      memcpy(recvQueue[seqNum], buf, BUFSIZE);
+    if(((seqNum >= recvBase) && (seqNum - recvBase < recvWin)) ||
+       ((seqNum < recvBase) && (seqNum < (recvWin - (QSIZE - recvBase))))) {
+      // Write queue buffer if it's not a duplicate data.
+      if (!received[seqNum]) {
+        memcpy(recvQueue[seqNum], buf, BUFSIZE);
+        received[seqNum] = 1;
+      }
       // Send ACK.
       SendACK(sockfd, serv_addr, seqNum);
       // Write payload to file if recvBase is received.
@@ -128,29 +131,49 @@ int main(int argc, char* argv[])
 
           // Write data to file.
           fwrite(header->payload, 1, length, fd);
-          cout << "WRITE: PKT " << recvBase << " to file." << endl;
+          cout << "    WRITE: DATA " << recvBase << " to file." << endl;
           
-          // Received all data, exit. 
+          // Received all data. 
           if (EOFFlag) {
             fclose(fd);
-            cout << "File transfer complete." << endl;
-            return 0;
+            cout << "File transfer complete. Wait for sender complete." << endl;
+            while (1) {
+              recvlen = recvfrom(sockfd, buf, sizeof(SendHeader), 0,
+                                 (struct sockaddr *)&rec_addr, &addrlen);
+              // Exit if sender sends terminate message.
+              if (strncmp(buf, "TRANSFER DONE", 13) == 0) {
+                cout << "Sender received all ACK, close connection." << endl;
+                return 0;
+              }
+              // Data received.
+              struct SendHeader *header = (struct SendHeader *) buf;
+              if (isCorrupt()) {
+                cout << "CORRUPT: DATA " << header->seqNum << endl;
+                continue;
+              } else if (isLoss()) {
+                cout << "LOSS:    DATA " << header->seqNum << endl;
+                continue;
+              } else {
+                cout << "RECEIVE: DATA " << header->seqNum << endl;
+                SendACK(sockfd, serv_addr, header->seqNum); // Send ACK
+              }
+            }
           }
 
           received[recvBase] = 0;
           // Update base.
-          recvBase = recvBase + 1;
-          recvEnd = recvEnd + 1;
-          recvFront = recvFront + 1;
+          recvBase = (recvBase == QSIZE - 1)? 0: recvBase + 1;
+          recvEnd = (recvEnd == QSIZE - 1)? 0: recvEnd + 1;
+          recvFront = (recvFront == QSIZE)? 0: recvFront + 1;          
         }
       }
-    } else if ((seqNum < recvBase) && (seqNum >= recvFront)) { // Seq is in [rcv_base-N, rcv_base-1]
-      // Send ACK.
+    } else if (1) { // Seq is in [rcv_base-N, rcv_base-1]
+      // Send ACK.   
       SendACK(sockfd, serv_addr, seqNum);
     } else {
       // Ignore.
     }
   }
-  
+ 
   return 0;
 }
