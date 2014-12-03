@@ -11,14 +11,19 @@
 #define KWHT  "\x1B[37m"
 #define KEND  "\x1B[0m"
 
+// Queue
 #define BUFSIZE 1024
-#define QSIZE 200
+#define QSIZE 10
 #define WINSIZE 4
 #define SIZE 1016
-
+// Packet lost/corrupt rate
 #define LOSE 10
 #define CORRUPT 10
+// Timeout 1.5s
+#define SEC 1
+#define USEC 50000
 
+/* Sender packet format */
 struct SendHeader {
   uint32_t seqNum;
   uint16_t EOFFlag;
@@ -26,9 +31,11 @@ struct SendHeader {
   char payload[SIZE];
 };
 
+/* ACK format */
 struct ACKHeader {
   uint32_t ackNum;
 };
+
 
 bool isCorrupt() {
   return (rand()%100 < CORRUPT) ? true : false;

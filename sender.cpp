@@ -115,11 +115,6 @@ int main (int argc, char* argv[])
       memcpy(sendQueue[nextSeq], datagram, BUFSIZE);
       ack[nextSeq] = 0;
 
-#ifdef DEBUG
-      cout << "Seq #:" << header->nextSeq << " EOF: " << header->EOFFlag <<
-              " length: " << header->length << endl;
-#endif
-
       // Send msg.
       if (sendto(sockfd, sendQueue[nextSeq], sizeof(SendHeader), 0,
           (struct sockaddr *)&rec_addr, sizeof(rec_addr)) < 0) {
@@ -134,9 +129,9 @@ int main (int argc, char* argv[])
 
     // Wait for ACK.
     while (1) {
-      // Set timeout 2.5s
-      tv.tv_sec = 2;
-      tv.tv_usec = 500000;
+      // Set timeout
+      tv.tv_sec = SEC;
+      tv.tv_usec = USEC;
       // Set select fds.
       FD_ZERO(&sockfds);
       FD_SET(sockfd, &sockfds);
@@ -155,22 +150,16 @@ int main (int argc, char* argv[])
         
         // Deal with Loss and corrupt.
         if (isCorrupt()) {
-          printf("%sCORRUPT: ACK %d\n%s", KRED, ackNum, KEND);
+          printf("\t\t\t%sCORRUPT: ACK %d\n%s", KRED, ackNum, KEND);
           continue;
         } else if (isLoss()) {
-          printf("%sLOSS: ACK %d\n%s", KRED, ackNum, KEND); 
+          printf("\t\t\t%sLOSS: ACK %d\n%s", KRED, ackNum, KEND); 
           continue;
         } else {
           ack[ackNum] = 1; // Set ACK.
-          cout << "RECEIVE: ACK " << ackNum << endl;
+          cout << "\t\t\tRECEIVE: ACK " << ackNum << endl;
         }
-
         
-
-#ifdef DEBUG
-        cout << "SendBase = " << sendBase << endl;
-        cout << "lastSeq = " << lastSeq << endl;
-#endif
         // If ackNum != sendBase, continue to listen for ACK.
  
         // If ackNum == sendBase, update sendBase.
@@ -198,11 +187,10 @@ int main (int argc, char* argv[])
                    (struct sockaddr *)&rec_addr, sizeof(rec_addr)) < 0) {
             printf("Send msg to sender failed\n");
         } else {
-          cout << "RESEND: DATA " << sendBase << endl;
+          printf("%sRESEND: DATA %d\n%s", KYEL, sendBase, KEND);
         }
       }    
     }
-
   }
   return 0;
 }

@@ -20,7 +20,7 @@ void SendACK(int sockfd, struct sockaddr_in& serv_addr, int seq)
   struct ACKHeader *ack = (struct ACKHeader *) msg;
   ack->ackNum = seq;
   sendto(sockfd, msg, sizeof(msg), 0, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
-  cout << "  SEND: ACK " << seq << endl;
+  cout << "SEND: ACK " << seq << endl;
 }
 
 int main(int argc, char* argv[])
@@ -65,6 +65,7 @@ int main(int argc, char* argv[])
   cout << "SEND MSG: " << msg << endl;
 
   int received[QSIZE];
+  memset(received, 0, QSIZE*sizeof(int));
   char recvQueue[QSIZE][BUFSIZE];
   int winSize = WINSIZE;
   int recBase = 0;
@@ -74,7 +75,7 @@ int main(int argc, char* argv[])
   int recvlen; // # bytes received
   char buf[BUFSIZE]; 
 
-  uint32_t seqNum;
+  int32_t seqNum;
   unsigned int recvWin = WINSIZE;
   int recvBase = 0;
   int recvFront = QSIZE - recvWin;
@@ -99,18 +100,18 @@ int main(int argc, char* argv[])
 
     // Check if data is corrupt or loss.
     if (isCorrupt()) {
-      cout << "CORRUPT: DATA " << seqNum << endl;
+      printf("\t\t\t%sCORRUPT: DATA %d\n%s", KRED, seqNum, KEND);
       continue;  
     } else if (isLoss()) {
-      cout << "LOSS: DATA " << seqNum << endl;
+      printf("\t\t\t%sLOSS: DATA %d\n%s", KRED, seqNum, KEND);
       continue;
     } else {
-      cout << "RECEIVE: DATA " << seqNum << endl;
+      cout << "\t\t\tRECEIVE: DATA " << seqNum << endl;
     }
-    
+   
     // Seq is in [rcv_base, rcv_base+N-1]
     if(((seqNum >= recvBase) && (seqNum - recvBase < recvWin)) ||
-       ((seqNum < recvBase) && (seqNum < (recvWin - (QSIZE - recvBase))))) {
+       ((seqNum < recvBase) && (QSIZE - recvBase) + seqNum < recvWin)) {
       // Write queue buffer if it's not a duplicate data.
       if (!received[seqNum]) {
         memcpy(recvQueue[seqNum], buf, BUFSIZE);
@@ -128,7 +129,7 @@ int main(int argc, char* argv[])
 
           // Write data to file.
           fwrite(header->payload, 1, length, fd);
-          cout << "    WRITE: DATA " << recvBase << " to file." << endl;
+          cout << "\t\t\t\t\t\tWRITE: DATA " << recvBase << " to file." << endl;
           
           // Received all data. 
           if (EOFFlag) {
@@ -145,13 +146,13 @@ int main(int argc, char* argv[])
               // Data received.
               struct SendHeader *header = (struct SendHeader *) buf;
               if (isCorrupt()) {
-                cout << "CORRUPT: DATA " << header->seqNum << endl;
+                printf("\t\t\t%sCORRUPT: DATA %d\n%s", KRED, header->seqNum, KEND);
                 continue;
               } else if (isLoss()) {
-                cout << "LOSS: DATA " << header->seqNum << endl;
+                printf("\t\t\t%sLOSS: DATA %d\n%s", KRED, header->seqNum, KEND);
                 continue;
               } else {
-                cout << "RECEIVE: DATA " << header->seqNum << endl;
+                cout << "\t\t\tRECEIVE: DATA " << header->seqNum << endl;
                 SendACK(sockfd, serv_addr, header->seqNum); // Send ACK
               }
             }
@@ -160,17 +161,20 @@ int main(int argc, char* argv[])
           received[recvBase] = 0;
           // Update base.
           recvBase = (recvBase == QSIZE - 1)? 0: recvBase + 1;
-          recvFront = (recvFront == QSIZE)? 0: recvFront + 1;          
+          recvFront = (recvFront == QSIZE - 1)? 0: recvFront + 1;          
         }
       }
     } else if (((seqNum >= recvFront) && (seqNum - recvFront < recvWin)) ||
                ((seqNum < recvFront) && 
                 (seqNum < (recvWin - (QSIZE - recvFront))))) {
-      // Seq is in [rcv_base-N, rcv_base-1]. Send ACK.   
+      // Seq is in [rcv_base-N, rcv_base-1]. Send ACK.
       SendACK(sockfd, serv_addr, seqNum);
     } else {
       // Ignore.
     }
+    
+
+
   }
   return 0;
 }
