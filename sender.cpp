@@ -90,7 +90,7 @@ int main (int argc, char* argv[])
   while (1) {
     // Unused slots exist in window.
     while ((((nextSeq >= sendBase) && (nextSeq - sendBase < cwnd)) ||
-           ((nextSeq < sendBase) && nextSeq < (cwnd - (QSIZE - sendBase))))
+           ((nextSeq < sendBase) && ((QSIZE - sendBase) + nextSeq < cwnd)))
            && lastSeq == -1 ) { 
 
       // Read file.

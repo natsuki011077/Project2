@@ -166,15 +166,12 @@ int main(int argc, char* argv[])
       }
     } else if (((seqNum >= recvFront) && (seqNum - recvFront < recvWin)) ||
                ((seqNum < recvFront) && 
-                (seqNum < (recvWin - (QSIZE - recvFront))))) {
+                ((QSIZE - recvFront) + seqNum < recvWin))) {
       // Seq is in [rcv_base-N, rcv_base-1]. Send ACK.
       SendACK(sockfd, serv_addr, seqNum);
     } else {
       // Ignore.
     }
-    
-
-
   }
   return 0;
 }
