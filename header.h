@@ -10,12 +10,17 @@
 #define KCYN  "\x1B[36m"
 #define KWHT  "\x1B[37m"
 #define KEND  "\x1B[0m"
-
+// Flag
+#define RET 0x10
+#define SYN 0x8
+#define ACK 0x4
+#define FIN 0x2
+#define END 0x1
 // Queue
 #define BUFSIZE 1024
 #define QSIZE 10
 #define WINSIZE 4
-#define SIZE 1016
+#define SIZE 1012
 // Packet lost/corrupt rate
 #define LOSE 10
 #define CORRUPT 10
@@ -24,18 +29,13 @@
 #define USEC 50000
 
 /* Sender packet format */
-struct SendHeader {
+struct Header {
   uint32_t seqNum;
-  uint16_t EOFFlag;
+  uint32_t ackNum;
+  uint16_t flag;
   uint16_t length;
   char payload[SIZE];
 };
-
-/* ACK format */
-struct ACKHeader {
-  uint32_t ackNum;
-};
-
 
 bool isCorrupt() {
   return (rand()%100 < CORRUPT) ? true : false;
