@@ -23,6 +23,7 @@ void SendACK(int sockfd, struct sockaddr_in& serv_addr, int seq)
   header->flag |= ACK;
   sendto(sockfd, datagram, sizeof(Header), 0, (struct sockaddr *)&serv_addr,
          sizeof(serv_addr));
+  timestamp();
   cout << "SEND: ACK " << seq << endl;
 }
 
@@ -107,7 +108,8 @@ int main(int argc, char* argv[])
     cout << "Send msg to sender failed" << endl;
     return 0;
   }
-  cout << "SEND RETRIEVE MESSAGE FOR FOR " << filename;
+  timestamp();
+  cout << "SEND SYN MESSAGE FOR FOR " << filename;
   cout << ", SET SENDBASE: " << sendHeader->seqNum << endl;
 
   // Wait for SYNACK.
@@ -125,6 +127,7 @@ int main(int argc, char* argv[])
                          (struct sockaddr *)&rec_addr, &addrlen);  
 
       // Check if data is corrupt or loss.
+      timestamp();
       if (isCorrupt()) {
         printf("%sCORRUPT: SYNACK\n%s", KRED, KEND);
         continue;
@@ -149,7 +152,9 @@ int main(int argc, char* argv[])
               recvlen = recvfrom(sockfd, buf, sizeof(Header), 0,
                                  (struct sockaddr *)&rec_addr, &addrlen);
               // Data received.
+              timestamp();
               if (recvHeader->flag & FIN) {
+                timestamp();
                 if (isCorrupt()) {
                   printf("%sCORRUPT: FIN\n%s", KRED, KEND);
                   continue;
@@ -164,6 +169,8 @@ int main(int argc, char* argv[])
                   sendHeader->flag |= (FIN | ACK);
                   sendto(sockfd, datagram, sizeof(Header), 0,
                          (struct sockaddr *)&serv_addr, sizeof(serv_addr)); 
+                  timestamp();
+                  cout << "SEND FINACK" << endl;
                   while (1) {
                     // Set timer to 10 sec.
                     tv.tv_sec = 10;
@@ -180,6 +187,8 @@ int main(int argc, char* argv[])
                       if (recvHeader->flag & (FIN)) {
                         sendto(sockfd, datagram, sizeof(Header), 0,
                                (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+                        timestamp(); 
+                        cout << "SEND FINACK" << endl;
                       }
                     } else {
                       // Timeout, terminate.
@@ -206,9 +215,21 @@ int main(int argc, char* argv[])
         }
       }
     } else { // timeout. Resend request.
-      sendto(sockfd, datagram, sizeof(Header), 0, (struct sockaddr *)&serv_addr,
-             sizeof(serv_addr));
-      cout << "RESEND RETRIEVE MESSAGE." << endl;
+      memset(datagram, 0, BUFSIZE);
+      // Write header.
+      sendHeader->seqNum = recvBase;
+      sendHeader->flag |= SYN;
+      sendHeader->length = strlen(filename);
+      // Write payload.
+      memcpy(sendHeader->payload, filename, strlen(filename));
+      if (sendto(sockfd, datagram, sizeof(Header), 0, (struct sockaddr *)&serv_addr,
+                 sizeof(serv_addr)) < 0) {
+        cout << "Send msg to sender failed" << endl;
+        return 0;
+      }
+      timestamp();
+      cout << "RESEND SYN MESSAGE FOR FOR " << filename;
+      cout << ", SET SENDBASE: " << sendHeader->seqNum << endl;
     }
   }
 
@@ -218,107 +239,102 @@ int main(int argc, char* argv[])
     recvlen = recvfrom(sockfd, buf, sizeof(Header), 0,
                        (struct sockaddr *)&rec_addr, &addrlen);  
 
-    seqNum = recvHeader->seqNum;
-    // Check if data is corrupt or loss.
-    if (isCorrupt()) {
-      printf("\t\t\t%sCORRUPT: DATA %d\n%s", KRED, seqNum, KEND);
-      continue;  
-    } else if (isLoss()) {
-      printf("\t\t\t%sLOSS: DATA %d\n%s", KRED, seqNum, KEND);
-      continue;
-    } else {
-      cout << "\t\t\tRECEIVE: DATA " << seqNum << endl;
-    }
-   
-    // Seq is in [rcv_base, rcv_base+N-1]
-    if(((seqNum >= recvBase) && (seqNum - recvBase < recvWin)) ||
-       ((seqNum < recvBase) && (QSIZE - recvBase) + seqNum < recvWin)) {
-      // Write queue buffer if it's not a duplicate data.
-      if (!received[seqNum]) {
-        memcpy(recvQueue[seqNum], buf, BUFSIZE);
-        received[seqNum] = 1;
-      }
-      // Send ACK.
-      SendACK(sockfd, serv_addr, seqNum);
-      // Write payload to file if recvBase is received.
-      if (seqNum == recvBase) {
-        while (received[recvBase]) {           
-          // Write data to file.
-          qHeader = (struct Header *) recvQueue[recvBase];
-          fwrite(qHeader->payload, 1, qHeader->length, fd);
-          cout << "\t\t\t\t\t\tWRITE: DATA " << recvBase << " to file." << endl;
-          // Received all data. 
-          if (recvHeader->flag & END) {
-            fclose(fd);
-            cout << "File transfer complete. Wait for sender complete." << endl;
-            while (1) {
-              recvlen = recvfrom(sockfd, buf, sizeof(Header), 0,
-                                 (struct sockaddr *)&rec_addr, &addrlen);
-              // Data received.
-              if (recvHeader->flag & FIN) {
-                if (isCorrupt()) {
-                  printf("%sCORRUPT: FIN\n%s", KRED, KEND);
-                  continue;
-                } else if (isLoss()) {
-                  printf("%sLOSS: FIN\n%s", KRED, KEND);
-                  continue;
-                } else {
-                  cout << "RECEIVE FIN." << endl;
-                  // Send FINACK
-                  memset(datagram, 0, BUFSIZE);
-                  // Write header.
-                  sendHeader->flag |= (FIN | ACK);
-                  sendto(sockfd, datagram, sizeof(Header), 0,
-                         (struct sockaddr *)&serv_addr, sizeof(serv_addr)); 
-                  while (1) {
-                    // Set timer to 10 sec.
-                    tv.tv_sec = 10;
-                    tv.tv_usec = 0;
-                    FD_ZERO(&sockfds);
-                    FD_SET(sockfd, &sockfds);
+    timestamp();
+    if (recvHeader->flag & FIN) {
+      if (isCorrupt()) {
+        printf("%sCORRUPT: FIN\n%s", KRED, KEND);
+        continue;
+      } else if (isLoss()) {
+        printf("%sLOSS: FIN\n%s", KRED, KEND);
+        continue;
+      } else {
+        // Receive FIN.
+        cout << "RECEIVE FIN" << endl;
+        // Send FINACK.
+        memset(datagram, 0, BUFSIZE);
+        sendHeader->flag |= (FIN | ACK);
+        sendto(sockfd, datagram, sizeof(Header), 0,
+               (struct sockaddr *)&serv_addr, sizeof(serv_addr)); 
+        timestamp();
+        cout << "SEND FINACK" << endl;
+        // Wait for 10 sec. and terminate.
+        while (1) {
+          tv.tv_sec = 10;
+          tv.tv_usec = 0;
+          FD_ZERO(&sockfds);
+          FD_SET(sockfd, &sockfds);
 
-                    select(sockfd+1, &sockfds, NULL, NULL, &tv);
-                    if (FD_ISSET(sockfd, &sockfds)) {
-                      memset(buf, 0, BUFSIZE);
-                      recvlen = recvfrom(sockfd, buf, sizeof(Header), 0,
-                                         (struct sockaddr *)&rec_addr, &addrlen);  
-                      // Receive FIN, send FINACK. (FINACK may be lost).
-                      if (recvHeader->flag & (FIN)) {
-                        sendto(sockfd, datagram, sizeof(Header), 0,
-                               (struct sockaddr *)&serv_addr, sizeof(serv_addr));
-                      }
-                    } else {
-                      // Timeout, terminate.
-                      return 0;
-                    }
-                  }
-                }
-              } else if (isCorrupt()) {
-                printf("\t\t\t%sCORRUPT: DATA %d\n%s", KRED, recvHeader->seqNum, KEND);
-                continue;
-              } else if (isLoss()) {
-                printf("\t\t\t%sLOSS: DATA %d\n%s", KRED, recvHeader->seqNum, KEND);
-                continue;
-              } else {
-                cout << "\t\t\tRECEIVE: DATA " << recvHeader->seqNum << endl;
-                SendACK(sockfd, serv_addr, recvHeader->seqNum); // Send ACK
-              }
+          select(sockfd+1, &sockfds, NULL, NULL, &tv);
+
+          if (FD_ISSET(sockfd, &sockfds)) {
+            memset(buf, 0, BUFSIZE);
+            recvlen = recvfrom(sockfd, buf, sizeof(Header), 0,
+                               (struct sockaddr *)&rec_addr, &addrlen);  
+            // Receive FIN, send FINACK. (FINACK may be lost).
+            if (recvHeader->flag & FIN) {
+              sendto(sockfd, datagram, sizeof(Header), 0,
+                     (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+              timestamp();
+              cout << "SEND FINACK" << endl;
             }
+          } else {
+            // Timeout, terminate.
+            return 0;
           }
-          // Clear recvQueue after data is written to output file.
-          received[recvBase] = 0;
-          // Update base.
-          recvBase = (recvBase == QSIZE - 1)? 0: recvBase + 1;
-          recvFront = (recvFront == QSIZE - 1)? 0: recvFront + 1;          
         }
       }
-    } else if (((seqNum >= recvFront) && (seqNum - recvFront < recvWin)) ||
-               ((seqNum < recvFront) && 
-                ((QSIZE - recvFront) + seqNum < recvWin))) {
-      // Seq is in [rcv_base-N, rcv_base-1]. Send ACK.
-      SendACK(sockfd, serv_addr, seqNum);
     } else {
-      // Ignore.
+      seqNum = recvHeader->seqNum;
+      if (isCorrupt()) {
+        printf("\t\t\t%sCORRUPT: DATA %d\n%s", KRED, seqNum, KEND);
+        continue;  
+      } else if (isLoss()) {
+        printf("\t\t\t%sLOSS: DATA %d\n%s", KRED, seqNum, KEND);
+        continue;
+      } else {
+        cout << "\t\t\tRECEIVE: DATA " << seqNum << endl;
+      }
+  
+      // Seq is in [rcv_base, rcv_base+N-1]
+      if(((seqNum >= recvBase) && (seqNum - recvBase < recvWin)) ||
+         ((seqNum < recvBase) && (QSIZE - recvBase) + seqNum < recvWin)) {
+//        cout << "Seq is in [rcv_base, rcv_base+N-1]" <<  endl;
+        // Write queue buffer if it's not a duplicate data.
+        if (!received[seqNum]) {
+          memcpy(recvQueue[seqNum], buf, BUFSIZE);
+          received[seqNum] = 1;
+        }
+        // Send ACK.
+        SendACK(sockfd, serv_addr, seqNum);
+        // Write payload to file if recvBase is received.
+       if (seqNum == recvBase) {
+          while (received[recvBase]) {           
+            // Write data to file.
+            qHeader = (struct Header *) recvQueue[recvBase];
+            fwrite(qHeader->payload, 1, qHeader->length, fd);
+            cout << "\t\t\t\t\t\tWRITE: DATA " << recvBase << " to file." << endl;
+            // Received all data. 
+            if (qHeader->flag & END) {
+              fclose(fd);
+              timestamp();
+              cout << "File transfer complete. Wait for sender complete." << endl;
+            }
+            // Clear recvQueue after data is written to output file.
+            received[recvBase] = 0;
+            // Update base.
+            recvBase = (recvBase == QSIZE - 1)? 0: recvBase + 1;
+            recvFront = (recvFront == QSIZE - 1)? 0: recvFront + 1;          
+          }
+        }
+      } else if (((seqNum >= recvFront) && (seqNum - recvFront < recvWin)) ||
+                 ((seqNum < recvFront) && 
+                  ((QSIZE - recvFront) + seqNum < recvWin))) {
+        // Seq is in [rcv_base-N, rcv_base-1]. Send ACK.
+//        cout << "Seq is in [rcv_base-N, rcv_base-1]. Send ACK" << endl;
+        SendACK(sockfd, serv_addr, seqNum);
+      } else {
+        // Ignore.
+      }
     }
   }
   return 0;

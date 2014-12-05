@@ -8,7 +8,6 @@
 #include <cstring>
 #include <iostream>
 #include <stdio.h>
-#include <sys/time.h>
 
 #include "header.h"
 using namespace std;
@@ -75,6 +74,7 @@ int main (int argc, char* argv[])
     recvlen = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr *)&rec_addr,
                        &addrlen);
     // Deal with Loss and corrupt.
+    timestamp();
     if (isCorrupt()) {
       printf("%sCORRUPT: SYN\n%s", KRED, KEND);
       continue;
@@ -88,6 +88,7 @@ int main (int argc, char* argv[])
         if ((fd = fopen(filename, "rb")) == NULL) {
           cout << "File " << filename << " does not exist!" <<  endl;
         } else {
+          timestamp();
           cout << "OPEN FILE: " << filename << endl;
           // Set sendBase to seqNum.
           sendBase = recvHeader->seqNum;
@@ -120,6 +121,7 @@ int main (int argc, char* argv[])
              sizeof(rec_addr)) < 0) {
     cout << "Send msg to sender failed" << endl;
   } else {
+    timestamp();
     cout << "SEND: DATA " << nextSeq << " WITH SYNACK" << endl;
   }
 
@@ -147,6 +149,7 @@ int main (int argc, char* argv[])
 
       int ackNum = recvHeader->seqNum;       
       // Deal with Loss and corrupt.
+      timestamp();
       if (isCorrupt()) {
         printf("\t\t\t%sCORRUPT: ACK %d\n%s", KRED, ackNum, KEND);
         continue;
@@ -155,7 +158,7 @@ int main (int argc, char* argv[])
         continue;
       } else {
         // Ignore other data except ACK. 
-        if (recvHeader->flag & ACK) {
+        if (recvHeader->flag & ACK || sendBase == ackNum) {
           cout << "\t\t\tRECEIVE: ACK " << ackNum << endl;
           if (sendBase == lastSeq) {
             cout << "Reliable transfer done!" << endl;
@@ -165,6 +168,7 @@ int main (int argc, char* argv[])
             sendHeader->flag = FIN;
             sendto(sockfd, datagram, sizeof(Header), 0,
                    (struct sockaddr *)&rec_addr, sizeof(rec_addr));
+            timestamp();
             cout << "SEND: FIN (RECEIVE ALL ACK)" << endl;
 
             // Wait for FINACK
@@ -188,6 +192,7 @@ int main (int argc, char* argv[])
                 }
  
                 // Deal with Loss and corrupt.
+                timestamp();
                 if (isCorrupt()) {
                   printf("%sCORRUPT: FINACK\n%s", KRED, KEND);
                   continue;
@@ -201,6 +206,7 @@ int main (int argc, char* argv[])
               } else { //timeout
                 sendto(sockfd, datagram, sizeof(Header), 0,
                        (struct sockaddr *)&rec_addr, sizeof(rec_addr));
+                timestamp();
                 cout << "RESEND: FIN (RECEIVE ALL ACK)" << endl;
               }
             }
@@ -214,7 +220,8 @@ int main (int argc, char* argv[])
     } else { // Timeout, resend data.
       sendto(sockfd, datagram, sizeof(Header), 0, (struct sockaddr *)&rec_addr,
              sizeof(rec_addr));
-      cout << "RESEND: DATA " << nextSeq << " WITH SYNACK" << endl;
+      timestamp();
+      cout << "SEND: DATA " << nextSeq << " WITH SYNACK" << endl;
     }
   }
 
@@ -246,6 +253,7 @@ int main (int argc, char* argv[])
           (struct sockaddr *)&rec_addr, sizeof(rec_addr)) < 0) {
         cout << "Send msg to sender failed" << endl;
       } else {
+        timestamp();
         cout << "SEND: DATA " << nextSeq << endl;
       }
 
@@ -281,6 +289,7 @@ int main (int argc, char* argv[])
         int ackNum = recvHeader->seqNum;
         
         // Deal with Loss and corrupt.
+        timestamp();
         if (isCorrupt()) {
           printf("\t\t\t%sCORRUPT: ACK %d\n%s", KRED, ackNum, KEND);
           continue;
@@ -298,6 +307,7 @@ int main (int argc, char* argv[])
             ack[sendBase] = 0; // clear ACK queue.
             // If ACK to the last seq, file has been reliably received.
             if (sendBase == lastSeq) {
+              timestamp();
               cout << "Reliable transfer done!" << endl;
 
               // Send FIN data.
@@ -305,6 +315,7 @@ int main (int argc, char* argv[])
               sendHeader->flag = FIN;
               sendto(sockfd, datagram, sizeof(Header), 0,
                      (struct sockaddr *)&rec_addr, sizeof(rec_addr));
+              timestamp();
               cout << "SEND: FIN (RECEIVE ALL ACK)" << endl;
 
               // Wait for FINACK
@@ -328,6 +339,7 @@ int main (int argc, char* argv[])
                   }
  
                   // Deal with Loss and corrupt.
+                  timestamp();
                   if (isCorrupt()) {
                     printf("%sCORRUPT: FINACK\n%s", KRED, KEND);
                     continue;
@@ -341,6 +353,7 @@ int main (int argc, char* argv[])
                 } else { //timeout
                   sendto(sockfd, datagram, sizeof(Header), 0,
                          (struct sockaddr *)&rec_addr, sizeof(rec_addr));
+                  timestamp();
                   cout << "RESEND: FIN (RECEIVE ALL ACK)" << endl;
                 }
               }
@@ -358,6 +371,7 @@ int main (int argc, char* argv[])
                    (struct sockaddr *)&rec_addr, sizeof(rec_addr)) < 0) {
             printf("Send msg to sender failed\n");
         } else {
+          timestamp();
           printf("%sRESEND: DATA %d\n%s", KYEL, sendBase, KEND);
         }
       }    
