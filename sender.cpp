@@ -157,6 +157,54 @@ int main (int argc, char* argv[])
         // Ignore other data except ACK. 
         if (recvHeader->flag & ACK) {
           cout << "\t\t\tRECEIVE: ACK " << ackNum << endl;
+          if (sendBase == lastSeq) {
+            cout << "Reliable transfer done!" << endl;
+
+            // Send FIN data.
+            memset(datagram, 0, BUFSIZE); 
+            sendHeader->flag = FIN;
+            sendto(sockfd, datagram, sizeof(Header), 0,
+                   (struct sockaddr *)&rec_addr, sizeof(rec_addr));
+            cout << "SEND: FIN (RECEIVE ALL ACK)" << endl;
+
+            // Wait for FINACK
+            while (1) {
+              tv.tv_sec = SEC;
+              tv.tv_usec = USEC;
+              FD_ZERO(&sockfds);
+              FD_SET(sockfd, &sockfds); 
+              // Use select to receive ack and deal with timeout.
+              select(sockfd+1, &sockfds, NULL, NULL, &tv);
+
+              // ACK received.
+              if (FD_ISSET(sockfd, &sockfds)) {
+                memset(buf, 0, BUFSIZE);
+                recvlen = recvfrom(sockfd, buf, BUFSIZE, 0,
+                                   (struct sockaddr *)&rec_addr, &addrlen);
+
+                if (!(recvHeader->flag & ACK)) {
+                  cout << "NOT AN ACK!!" << endl;
+                  continue;
+                }
+ 
+                // Deal with Loss and corrupt.
+                if (isCorrupt()) {
+                  printf("%sCORRUPT: FINACK\n%s", KRED, KEND);
+                  continue;
+                } else if (isLoss()) {
+                  printf("%sLOSS: FINACK\n%s", KRED, KEND); 
+                  continue;
+                } else {
+                  cout << "RECEIVE: FINACK, terminate." << endl;
+                  return 0;
+                }
+              } else { //timeout
+                sendto(sockfd, datagram, sizeof(Header), 0,
+                       (struct sockaddr *)&rec_addr, sizeof(rec_addr));
+                cout << "RESEND: FIN (RECEIVE ALL ACK)" << endl;
+              }
+            }
+          }
           // Increment sendBase and nextSeq.
           sendBase = (sendBase == QSIZE-1)? 0: sendBase + 1;
           nextSeq = sendBase;

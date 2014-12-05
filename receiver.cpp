@@ -137,7 +137,7 @@ int main(int argc, char* argv[])
             recvHeader->flag & (SYN | ACK | END)) {
           cout << "RECEIVE: SYNACK"  << endl;
           // Send ACK.
-          SendACK(sockfd, serv_addr, seqNum);
+          SendACK(sockfd, serv_addr, recvHeader->seqNum);
           // Write data to file.
           fwrite(recvHeader->payload, 1, recvHeader->length, fd);
           cout << "\t\t\t\t\t\tWRITE: DATA " << recvBase << " to file." << endl;
