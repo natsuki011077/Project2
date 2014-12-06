@@ -14,7 +14,7 @@
 #define BUFSIZE 1024
 #define QSIZE 100
 #define WINSIZE 4
-#define SIZE 1012
+#define SIZE 1016
 // Packet lost/corrupt rate
 #define LOSE 20
 #define CORRUPT 20
@@ -25,7 +25,6 @@
 /* Sender packet format */
 struct Header {
   uint32_t seqNum;
-  uint32_t ackNum;
   uint16_t flag;
   uint16_t length;
   char payload[SIZE];
